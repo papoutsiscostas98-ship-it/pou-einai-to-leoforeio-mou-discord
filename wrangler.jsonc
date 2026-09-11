@@ -1,0 +1,8 @@
+{
+  "name": "pou-einai-to-leoforeio-mou-discord",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-12",
+  "observability": {
+    "enabled": true
+  }
+}
