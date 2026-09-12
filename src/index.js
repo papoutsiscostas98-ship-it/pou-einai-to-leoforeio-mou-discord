@@ -1,4 +1,4 @@
-import linesCache from "./lines-cache.json" with { type: "json" };
+import linesCache from "../lines-cache.json" with { type: "json" };
 
 // ============================================================
 // CONFIG
