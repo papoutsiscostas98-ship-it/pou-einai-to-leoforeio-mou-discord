@@ -1,5 +1,5 @@
 const DISCORD_API = "https://discord.com/api/v10";
-const BUSAPP_API =
+const OASA_API =
   "https://telematics.oasa.gr/api/";
 
 export default {
@@ -48,7 +48,7 @@ export default {
 
     /*
      * ====================================================
-     * BASIC WORKER RESPONSE
+     * BASIC RESPONSE
      * ====================================================
      */
 
@@ -67,13 +67,15 @@ export default {
      * ====================================================
      */
 
-    const signature = request.headers.get(
-      "X-Signature-Ed25519"
-    );
+    const signature =
+      request.headers.get(
+        "X-Signature-Ed25519"
+      );
 
-    const timestamp = request.headers.get(
-      "X-Signature-Timestamp"
-    );
+    const timestamp =
+      request.headers.get(
+        "X-Signature-Timestamp"
+      );
 
     if (!signature || !timestamp) {
       return new Response(
@@ -84,7 +86,8 @@ export default {
       );
     }
 
-    const body = await request.text();
+    const body =
+      await request.text();
 
     /*
      * ====================================================
@@ -111,14 +114,15 @@ export default {
 
     /*
      * ====================================================
-     * PARSE JSON
+     * PARSE INTERACTION
      * ====================================================
      */
 
     let interaction;
 
     try {
-      interaction = JSON.parse(body);
+      interaction =
+        JSON.parse(body);
     } catch {
       return new Response(
         "Invalid JSON",
@@ -165,12 +169,6 @@ export default {
         env
       );
     }
-
-    /*
-     * ====================================================
-     * UNKNOWN INTERACTION
-     * ====================================================
-     */
 
     return new Response(
       "Unknown interaction type",
@@ -254,22 +252,24 @@ async function registerCommands(env) {
   ];
 
   try {
-    const response = await fetch(
-      `${DISCORD_API}/applications/${env.APPLICATION_ID}/commands`,
-      {
-        method: "PUT",
+    const response =
+      await fetch(
+        `${DISCORD_API}/applications/${env.APPLICATION_ID}/commands`,
+        {
+          method: "PUT",
 
-        headers: {
-          Authorization:
-            `Bot ${env.DISCORD_TOKEN}`,
+          headers: {
+            Authorization:
+              `Bot ${env.DISCORD_TOKEN}`,
 
-          "Content-Type":
-            "application/json",
-        },
+            "Content-Type":
+              "application/json",
+          },
 
-        body: JSON.stringify(commands),
-      }
-    );
+          body:
+            JSON.stringify(commands),
+        }
+      );
 
     const text =
       await response.text();
@@ -287,7 +287,8 @@ async function registerCommands(env) {
     return new Response(
       text,
       {
-        status: response.status,
+        status:
+          response.status,
 
         headers: {
           "Content-Type":
@@ -349,10 +350,6 @@ async function handleCommand(
     });
   }
 
-  /*
-   * Βρίσκουμε τη γραμμή που επέλεξε ο χρήστης.
-   */
-
   const option =
     interaction.data?.options?.find(
       (item) =>
@@ -376,20 +373,13 @@ async function handleCommand(
     });
   }
 
-  /*
-   * Προς το παρόν επιβεβαιώνουμε τη γραμμή.
-   *
-   * Στο επόμενο βήμα θα χρησιμοποιήσουμε τη γραμμή
-   * για να βρούμε διαδρομές → στάσεις → αφίξεις.
-   */
-
   return Response.json({
     type: 4,
 
     data: {
       content:
         `🚌 Επιλέχθηκε η γραμμή **${lineQuery}**.\n\n` +
-        `⏳ Στο επόμενο βήμα θα αναζητήσουμε τις στάσεις και τις πραγματικές αφίξεις.`,
+        `⏳ Η σύνδεση με την Τηλεματική θα χρησιμοποιηθεί για τις διαδρομές και τις στάσεις.`,
     },
   });
 }
@@ -397,7 +387,9 @@ async function handleCommand(
 
 /*
  * ========================================================
- * AUTOCOMPLETE ΑΠΟ ΤΟ BUSAPP API
+ * AUTOCOMPLETE
+ *
+ * ΑΠΕΥΘΕΙΑΣ ΟΑΣΑ ΤΗΛΕΜΑΤΙΚΗ
  * ========================================================
  */
 
@@ -406,10 +398,6 @@ async function handleAutocomplete(
   env
 ) {
   try {
-    /*
-     * Βρίσκουμε ποια επιλογή πληκτρολογεί ο χρήστης.
-     */
-
     const option =
       interaction.data?.options?.find(
         (item) => item.focused
@@ -418,29 +406,38 @@ async function handleAutocomplete(
     const query =
       String(
         option?.value || ""
-      ).trim().toLowerCase();
+      )
+        .trim()
+        .toLowerCase();
 
     /*
      * ----------------------------------------------------
-     * Ζητάμε τις πραγματικές γραμμές από το BusApp
+     * ΑΠΕΥΘΕΙΑΣ ΚΛΗΣΗ ΣΤΗΝ ΤΗΛΕΜΑΤΙΚΗ
+     *
+     * Δεν χρησιμοποιούμε:
+     *
+     * ❌ BusApp API
+     * ❌ /api/lines
+     *
      * ----------------------------------------------------
      */
 
-    const response = await fetch(
-      `${BUSAPP_API}/api/lines`,
-      {
-        method: "GET",
+    const response =
+      await fetch(
+        `${OASA_API}?act=webGetLines`,
+        {
+          method: "GET",
 
-        headers: {
-          Accept:
-            "application/json",
-        },
-      }
-    );
+          headers: {
+            Accept:
+              "application/json",
+          },
+        }
+      );
 
     if (!response.ok) {
       console.error(
-        "BusApp /api/lines returned:",
+        "OASA webGetLines returned:",
         response.status
       );
 
@@ -457,21 +454,13 @@ async function handleAutocomplete(
       await response.json();
 
     /*
-     * Το BusApp API επιστρέφει:
-     *
-     * {
-     *   success: true,
-     *   results: [...]
-     * }
+     * Η τηλεματική επιστρέφει απευθείας
+     * τον πίνακα των γραμμών.
      */
 
-    if (
-      !data ||
-      data.success !== true ||
-      !Array.isArray(data.results)
-    ) {
+    if (!Array.isArray(data)) {
       console.error(
-        "Invalid BusApp /api/lines response:",
+        "Unexpected OASA webGetLines response:",
         data
       );
 
@@ -486,13 +475,12 @@ async function handleAutocomplete(
 
     /*
      * ----------------------------------------------------
-     * Μετατρέπουμε τις πραγματικές γραμμές του BusApp
-     * σε Discord autocomplete choices.
+     * ΜΕΤΑΤΡΟΠΗ OASA → DISCORD
      * ----------------------------------------------------
      */
 
     const choices =
-      data.results
+      data
         .map((line) => {
           const lineId =
             String(
@@ -513,18 +501,14 @@ async function handleAutocomplete(
             return null;
           }
 
-          /*
-           * Ελληνικό όνομα ως κύρια εμφάνιση.
-           */
-
           let displayName =
             greekName
               ? `${lineId} - ${greekName}`
               : lineId;
 
           /*
-           * Discord επιτρέπει μέχρι 100 χαρακτήρες
-           * στο name μιας choice.
+           * Discord choice name:
+           * maximum 100 characters.
            */
 
           displayName =
@@ -534,9 +518,11 @@ async function handleAutocomplete(
             );
 
           return {
-            name: displayName,
+            name:
+              displayName,
 
-            value: lineId,
+            value:
+              lineId,
           };
         })
 
@@ -544,8 +530,7 @@ async function handleAutocomplete(
 
     /*
      * ----------------------------------------------------
-     * Φιλτράρισμα σύμφωνα με αυτό που πληκτρολόγησε
-     * ο χρήστης.
+     * ΦΙΛΤΡΑΡΙΣΜΑ
      * ----------------------------------------------------
      */
 
@@ -553,10 +538,12 @@ async function handleAutocomplete(
       choices
         .filter((choice) => {
           const name =
-            choice.name.toLowerCase();
+            choice.name
+              .toLowerCase();
 
           const value =
-            choice.value.toLowerCase();
+            choice.value
+              .toLowerCase();
 
           return (
             !query ||
@@ -566,8 +553,8 @@ async function handleAutocomplete(
         })
 
         /*
-         * Discord autocomplete:
-         * maximum 25 choices.
+         * Discord:
+         * maximum 25 autocomplete choices.
          */
 
         .slice(0, 25);
@@ -582,7 +569,7 @@ async function handleAutocomplete(
     });
   } catch (error) {
     console.error(
-      "BusApp autocomplete error:",
+      "OASA autocomplete error:",
       error
     );
 
@@ -705,7 +692,9 @@ function hexToUint8Array(hex) {
         16
       );
 
-    if (Number.isNaN(value)) {
+    if (
+      Number.isNaN(value)
+    ) {
       throw new Error(
         "Invalid hexadecimal value"
       );
