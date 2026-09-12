@@ -1,4 +1,6 @@
 const DISCORD_API = "https://discord.com/api/v10";
+const BUSAPP_API =
+  "https://busapp.papoutsiscostas98.gr";
 
 export default {
   async fetch(request, env) {
@@ -8,11 +10,6 @@ export default {
      * ====================================================
      * REGISTER
      * POST /register
-     *
-     * Χρησιμοποιεί:
-     * - env.DISCORD_TOKEN
-     * - env.REGISTER_KEY
-     * - env.APPLICATION_ID
      * ====================================================
      */
 
@@ -213,15 +210,21 @@ async function registerCommands(env) {
   const commands = [
     {
       name: "αφίξεις",
+
       description:
         "Δες τις επόμενες αφίξεις λεωφορείων σε στάση.",
+
       options: [
         {
           type: 3,
+
           name: "γραμμή",
+
           description:
             "Αριθμός ή όνομα γραμμής",
+
           required: true,
+
           autocomplete: true,
         },
       ],
@@ -229,15 +232,21 @@ async function registerCommands(env) {
 
     {
       name: "arrivals",
+
       description:
         "See upcoming bus arrivals at a stop.",
+
       options: [
         {
           type: 3,
+
           name: "line",
+
           description:
             "Bus line number or name",
+
           required: true,
+
           autocomplete: true,
         },
       ],
@@ -295,6 +304,7 @@ async function registerCommands(env) {
     return new Response(
       JSON.stringify({
         success: false,
+
         error:
           error?.message ||
           String(error),
@@ -314,7 +324,7 @@ async function registerCommands(env) {
 
 /*
  * ========================================================
- * SLASH COMMAND HANDLER
+ * SLASH COMMAND
  * ========================================================
  */
 
@@ -340,43 +350,37 @@ async function handleCommand(
   }
 
   /*
-   * Έλεγχος Cloudflare bindings
+   * Βρίσκουμε τη γραμμή που επέλεξε ο χρήστης.
    */
 
-  if (!env.DISCORD_TOKEN) {
-    console.error(
-      "DISCORD_TOKEN is missing"
+  const option =
+    interaction.data?.options?.find(
+      (item) =>
+        item.name === "γραμμή" ||
+        item.name === "line"
     );
 
+  const lineQuery =
+    String(
+      option?.value || ""
+    ).trim();
+
+  if (!lineQuery) {
     return Response.json({
       type: 4,
 
       data: {
         content:
-          "❌ Το DISCORD_TOKEN δεν έχει ρυθμιστεί στο Cloudflare Worker.",
-      },
-    });
-  }
-
-  if (!env.APPLICATION_ID) {
-    console.error(
-      "APPLICATION_ID is missing"
-    );
-
-    return Response.json({
-      type: 4,
-
-      data: {
-        content:
-          "❌ Το APPLICATION_ID δεν έχει ρυθμιστεί στο Cloudflare Worker.",
+          "❌ Δεν επιλέχθηκε γραμμή.",
       },
     });
   }
 
   /*
-   * Προσωρινή απάντηση.
+   * Προς το παρόν επιβεβαιώνουμε τη γραμμή.
    *
-   * ΔΕΝ εμφανίζουμε το Token ή το REGISTER_KEY.
+   * Στο επόμενο βήμα θα χρησιμοποιήσουμε τη γραμμή
+   * για να βρούμε διαδρομές → στάσεις → αφίξεις.
    */
 
   return Response.json({
@@ -384,9 +388,8 @@ async function handleCommand(
 
     data: {
       content:
-        `🤖 Το Λεωφορεία Worker λειτουργεί!\n\n` +
-        `Application ID: \`${env.APPLICATION_ID}\`\n` +
-        `Command: \`/${commandName}\``,
+        `🚌 Επιλέχθηκε η γραμμή **${lineQuery}**.\n\n` +
+        `⏳ Στο επόμενο βήμα θα αναζητήσουμε τις στάσεις και τις πραγματικές αφίξεις.`,
     },
   });
 }
@@ -394,7 +397,7 @@ async function handleCommand(
 
 /*
  * ========================================================
- * AUTOCOMPLETE
+ * AUTOCOMPLETE ΑΠΟ ΤΟ BUSAPP API
  * ========================================================
  */
 
@@ -402,52 +405,195 @@ async function handleAutocomplete(
   interaction,
   env
 ) {
-  const option =
-    interaction.data?.options?.find(
-      (item) => item.focused
+  try {
+    /*
+     * Βρίσκουμε ποια επιλογή πληκτρολογεί ο χρήστης.
+     */
+
+    const option =
+      interaction.data?.options?.find(
+        (item) => item.focused
+      );
+
+    const query =
+      String(
+        option?.value || ""
+      ).trim().toLowerCase();
+
+    /*
+     * ----------------------------------------------------
+     * Ζητάμε τις πραγματικές γραμμές από το BusApp
+     * ----------------------------------------------------
+     */
+
+    const response = await fetch(
+      `${BUSAPP_API}/api/lines`,
+      {
+        method: "GET",
+
+        headers: {
+          Accept:
+            "application/json",
+        },
+      }
     );
 
-  const query =
-    String(
-      option?.value || ""
-    ).toLowerCase();
+    if (!response.ok) {
+      console.error(
+        "BusApp /api/lines returned:",
+        response.status
+      );
 
-  const testLines = [
-    {
-      name:
-        "304 - Νομισματοκοπείο - Άρτεμις",
-      value: "304",
-    },
+      return Response.json({
+        type: 8,
 
-    {
-      name:
-        "316 - Στ. Νομισματοκοπείο - Παλλήνη",
-      value: "316",
-    },
+        data: {
+          choices: [],
+        },
+      });
+    }
 
-    {
-      name:
-        "040 - Πειραιάς - Σύνταγμα",
-      value: "040",
-    },
-  ];
+    const data =
+      await response.json();
 
-  const choices =
-    testLines
-      .filter((line) =>
-        line.name
-          .toLowerCase()
-          .includes(query)
-      )
-      .slice(0, 25);
+    /*
+     * Το BusApp API επιστρέφει:
+     *
+     * {
+     *   success: true,
+     *   results: [...]
+     * }
+     */
 
-  return Response.json({
-    type: 8,
+    if (
+      !data ||
+      data.success !== true ||
+      !Array.isArray(data.results)
+    ) {
+      console.error(
+        "Invalid BusApp /api/lines response:",
+        data
+      );
 
-    data: {
-      choices,
-    },
-  });
+      return Response.json({
+        type: 8,
+
+        data: {
+          choices: [],
+        },
+      });
+    }
+
+    /*
+     * ----------------------------------------------------
+     * Μετατρέπουμε τις πραγματικές γραμμές του BusApp
+     * σε Discord autocomplete choices.
+     * ----------------------------------------------------
+     */
+
+    const choices =
+      data.results
+        .map((line) => {
+          const lineId =
+            String(
+              line.LineID ?? ""
+            ).trim();
+
+          const greekName =
+            String(
+              line.LineDescr ?? ""
+            ).trim();
+
+          const englishName =
+            String(
+              line.LineDescrEng ?? ""
+            ).trim();
+
+          if (!lineId) {
+            return null;
+          }
+
+          /*
+           * Ελληνικό όνομα ως κύρια εμφάνιση.
+           */
+
+          let displayName =
+            greekName
+              ? `${lineId} - ${greekName}`
+              : lineId;
+
+          /*
+           * Discord επιτρέπει μέχρι 100 χαρακτήρες
+           * στο name μιας choice.
+           */
+
+          displayName =
+            displayName.substring(
+              0,
+              100
+            );
+
+          return {
+            name: displayName,
+
+            value: lineId,
+          };
+        })
+
+        .filter(Boolean);
+
+    /*
+     * ----------------------------------------------------
+     * Φιλτράρισμα σύμφωνα με αυτό που πληκτρολόγησε
+     * ο χρήστης.
+     * ----------------------------------------------------
+     */
+
+    const filteredChoices =
+      choices
+        .filter((choice) => {
+          const name =
+            choice.name.toLowerCase();
+
+          const value =
+            choice.value.toLowerCase();
+
+          return (
+            !query ||
+            name.includes(query) ||
+            value.includes(query)
+          );
+        })
+
+        /*
+         * Discord autocomplete:
+         * maximum 25 choices.
+         */
+
+        .slice(0, 25);
+
+    return Response.json({
+      type: 8,
+
+      data: {
+        choices:
+          filteredChoices,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "BusApp autocomplete error:",
+      error
+    );
+
+    return Response.json({
+      type: 8,
+
+      data: {
+        choices: [],
+      },
+    });
+  }
 }
 
 
