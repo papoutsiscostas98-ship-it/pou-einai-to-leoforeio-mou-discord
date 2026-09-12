@@ -1,51 +1,29 @@
-import linesCacheData from "../lines-cache.json";
+import linesCache from "./lines-cache.json" with { type: "json" };
 
 // ============================================================
 // CONFIG
 // ============================================================
 
-const DISCORD_API = "https://discord.com/api/v10";
+const BUSAPP_API =
+  "https://busapp.papoutsiscostas98.gr/api";
 
-const OASA_API =
-  "https://telematics.oasa.gr/api/";
+const DISCORD_API =
+  "https://discord.com/api/v10";
 
-const APPLICATION_COMMAND_AUTOCOMPLETE = 4;
-const APPLICATION_COMMAND = 2;
-const MESSAGE_COMPONENT = 3;
-
-const AUTOCOMPLETE_RESULT = 8;
-const DEFERRED_CHANNEL_MESSAGE = 5;
-
-const MAX_AUTOCOMPLETE_CHOICES = 25;
-
-// ============================================================
-// LINES CACHE
-// ============================================================
-
-const linesCache = Array.isArray(linesCacheData)
-  ? linesCacheData
-  : Array.isArray(linesCacheData?.results)
-    ? linesCacheData.results
-    : [];
-
-console.log(
-  `💾 Lines cache loaded: ${linesCache.length} γραμμές`
-);
+const STOPS_PER_PAGE = 25;
 
 // ============================================================
 // HELPERS
 // ============================================================
 
 function json(data, status = 200) {
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers: {
-        "Content-Type": "application/json; charset=UTF-8",
-      },
-    }
-  );
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=UTF-8",
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 function text(data, status = 200) {
@@ -53,6 +31,7 @@ function text(data, status = 200) {
     status,
     headers: {
       "Content-Type": "text/plain; charset=UTF-8",
+      "Cache-Control": "no-store",
     },
   });
 }
@@ -61,51 +40,138 @@ function isEnglish(language) {
   return language === "en";
 }
 
-function getLineName(line, language = "el") {
-  if (language === "en") {
+function getLineId(line) {
+  return String(
+    line?.LineID ??
+      line?.lineId ??
+      line?.id ??
+      ""
+  );
+}
+
+function getLineCode(line) {
+  return String(
+    line?.LineCode ??
+      line?.lineCode ??
+      ""
+  );
+}
+
+function getLineGreek(line) {
+  return String(
+    line?.LineDescr ??
+      line?.lineDescription ??
+      line?.description ??
+      ""
+  );
+}
+
+function getLineEnglish(line) {
+  return String(
+    line?.LineDescrEng ??
+      line?.lineDescriptionEng ??
+      line?.descriptionEng ??
+      ""
+  );
+}
+
+function lineName(line, language) {
+  if (isEnglish(language)) {
     return (
-      line.LineDescrEng ||
-      line.LineDescr ||
-      line.LineID ||
-      "Unknown line"
+      getLineEnglish(line) ||
+      getLineGreek(line) ||
+      getLineId(line)
     );
   }
 
   return (
-    line.LineDescr ||
-    line.LineDescrEng ||
-    line.LineID ||
-    "Άγνωστη γραμμή"
+    getLineGreek(line) ||
+    getLineEnglish(line) ||
+    getLineId(line)
   );
 }
 
-function getRouteName(route, language = "el") {
-  if (language === "en") {
+function getRouteCode(route) {
+  return String(
+    route?.RouteCode ??
+      route?.routeCode ??
+      ""
+  );
+}
+
+function getRouteGreek(route) {
+  return String(
+    route?.RouteDescr ??
+      route?.routeDescription ??
+      route?.description ??
+      ""
+  );
+}
+
+function getRouteEnglish(route) {
+  return String(
+    route?.RouteDescrEng ??
+      route?.routeDescriptionEng ??
+      route?.descriptionEng ??
+      ""
+  );
+}
+
+function routeName(route, language) {
+  if (isEnglish(language)) {
     return (
-      route.RouteDescrEng ||
-      route.RouteDescr ||
-      `Route ${route.RouteCode}`
+      getRouteEnglish(route) ||
+      getRouteGreek(route) ||
+      getRouteCode(route)
     );
   }
 
   return (
-    route.RouteDescr ||
-    route.RouteDescrEng ||
-    `Διαδρομή ${route.RouteCode}`
+    getRouteGreek(route) ||
+    getRouteEnglish(route) ||
+    getRouteCode(route)
   );
 }
 
-function findLineByCode(lineCode) {
-  return linesCache.find(
-    (line) =>
-      String(line.LineCode) === String(lineCode)
+function getStopCode(stop) {
+  return String(
+    stop?.StopCode ??
+      stop?.stopCode ??
+      ""
   );
 }
 
-function findLineById(lineId) {
-  return linesCache.find(
-    (line) =>
-      String(line.LineID) === String(lineId)
+function getStopGreek(stop) {
+  return String(
+    stop?.StopDescr ??
+      stop?.stopDescription ??
+      stop?.description ??
+      ""
+  );
+}
+
+function getStopEnglish(stop) {
+  return String(
+    stop?.StopDescrEng ??
+      stop?.stopDescriptionEng ??
+      stop?.descriptionEng ??
+      ""
+  );
+}
+
+function stopName(stop, language) {
+  if (isEnglish(language)) {
+    return (
+      getStopEnglish(stop) ||
+      getStopGreek(stop) ||
+      getStopCode(stop)
+    );
+  }
+
+  return (
+    getStopGreek(stop) ||
+    getStopEnglish(stop) ||
+    getStopCode(stop)
   );
 }
 
@@ -128,64 +194,46 @@ function hexToUint8Array(hex) {
   return bytes;
 }
 
-async function verifyDiscordRequest(
+async function verifyDiscordSignature(
   request,
   body,
   publicKey
 ) {
-  try {
-    const signature =
-      request.headers.get(
-        "X-Signature-Ed25519"
-      );
-
-    const timestamp =
-      request.headers.get(
-        "X-Signature-Timestamp"
-      );
-
-    if (!signature || !timestamp) {
-      return false;
-    }
-
-    if (!publicKey) {
-      console.error(
-        "❌ DISCORD_PUBLIC_KEY is missing."
-      );
-
-      return false;
-    }
-
-    const encoder =
-      new TextEncoder();
-
-    const message = encoder.encode(
-      timestamp + body
+  const signature =
+    request.headers.get(
+      "X-Signature-Ed25519"
     );
 
-    const signatureBytes =
-      hexToUint8Array(signature);
+  const timestamp =
+    request.headers.get(
+      "X-Signature-Timestamp"
+    );
 
-    const publicKeyBytes =
-      hexToUint8Array(publicKey);
+  if (!signature || !timestamp) {
+    return false;
+  }
 
-    const cryptoKey =
-      await crypto.subtle.importKey(
-        "raw",
-        publicKeyBytes,
-        {
-          name: "Ed25519",
-        },
-        false,
-        ["verify"]
-      );
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      hexToUint8Array(publicKey),
+      {
+        name: "Ed25519",
+      },
+      false,
+      ["verify"]
+    );
+
+    const message = new TextEncoder().encode(
+      timestamp + body
+    );
 
     return await crypto.subtle.verify(
       {
         name: "Ed25519",
       },
-      cryptoKey,
-      signatureBytes,
+      key,
+      hexToUint8Array(signature),
       message
     );
   } catch (error) {
@@ -204,24 +252,17 @@ async function verifyDiscordRequest(
 
 async function discordRequest(
   path,
-  method,
-  token,
-  body
+  options = {}
 ) {
   const response = await fetch(
     `${DISCORD_API}${path}`,
     {
-      method,
+      ...options,
       headers: {
-        Authorization:
-          `Bot ${token}`,
         "Content-Type":
           "application/json",
+        ...(options.headers || {}),
       },
-      body:
-        body !== undefined
-          ? JSON.stringify(body)
-          : undefined,
     }
   );
 
@@ -242,128 +283,70 @@ async function discordRequest(
   }
 
   try {
-    return JSON.parse(
-      responseText
-    );
+    return JSON.parse(responseText);
   } catch {
     return responseText;
   }
 }
 
 // ============================================================
-// EDIT ORIGINAL DISCORD RESPONSE
+// BUSAPP API
 // ============================================================
 
-async function editOriginalResponse(
-  applicationId,
-  interactionToken,
-  token,
-  payload
+async function busAppFetch(
+  endpoint,
+  params = {}
 ) {
   const url =
-    `${DISCORD_API}/webhooks/` +
-    `${applicationId}/` +
-    `${interactionToken}/messages/@original`;
-
-  const response = await fetch(
-    url,
-    {
-      method: "PATCH",
-      headers: {
-        Authorization:
-          `Bot ${token}`,
-        "Content-Type":
-          "application/json",
-      },
-      body: JSON.stringify(
-        payload
-      ),
-    }
-  );
-
-  const responseText =
-    await response.text();
-
-  if (!response.ok) {
-    throw new Error(
-      `Discord edit HTTP ${response.status}: ${responseText.slice(
-        0,
-        1000
-      )}`
+    new URL(
+      `${BUSAPP_API}${endpoint}`
     );
-  }
-
-  return responseText;
-}
-
-// ============================================================
-// OASA FETCH
-// ============================================================
-
-async function oasaFetch(
-  params
-) {
-  const url =
-    new URL(OASA_API);
 
   for (
-    const [key, value]
-    of Object.entries(params)
+    const [key, value] of Object.entries(
+      params
+    )
   ) {
-    url.searchParams.set(
-      key,
-      String(value)
-    );
+    if (
+      value !== undefined &&
+      value !== null &&
+      value !== ""
+    ) {
+      url.searchParams.set(
+        key,
+        String(value)
+      );
+    }
   }
 
   console.log(
-    `🌐 OASA request: ${url.toString()}`
+    `🌐 BusApp request: ${url.toString()}`
   );
 
-  const started =
-    Date.now();
-
-  let response;
-
-  try {
-    response = await fetch(
+  const response =
+    await fetch(
       url.toString(),
       {
         method: "GET",
         headers: {
           Accept:
-            "application/json,text/plain,*/*",
+            "application/json",
           "User-Agent":
-            "PapoutsisDigital-DiscordBot/1.0",
+            "PapoutsisDigital-DiscordBot/2.0",
         },
       }
     );
-  } catch (error) {
-    throw new Error(
-      `OASA FETCH ERROR: ${
-        error?.message ||
-        String(error)
-      }`
-    );
-  }
 
-  const elapsed =
-    Date.now() - started;
+  console.log(
+    `📡 BusApp status: ${response.status}`
+  );
 
   const responseText =
     await response.text();
 
-  console.log(
-    `📡 OASA status: ${response.status} (${elapsed}ms)`
-  );
-
-  console.log(
-    `📦 OASA body length: ${responseText.length}`
-  );
-
   if (!response.ok) {
     throw new Error(
-      `OASA HTTP ${response.status}: ${responseText.slice(
+      `BusApp HTTP ${response.status}: ${responseText.slice(
         0,
         1000
       )}`
@@ -373,15 +356,24 @@ async function oasaFetch(
   let data;
 
   try {
-    data = JSON.parse(
-      responseText
-    );
+    data =
+      JSON.parse(responseText);
   } catch {
     throw new Error(
-      `OASA INVALID JSON: ${responseText.slice(
+      `Το BusApp επέστρεψε μη έγκυρο JSON: ${responseText.slice(
         0,
         1000
       )}`
+    );
+  }
+
+  if (
+    data &&
+    data.success === false
+  ) {
+    throw new Error(
+      data.error ||
+        "Το BusApp επέστρεψε αποτυχία."
     );
   }
 
@@ -389,27 +381,894 @@ async function oasaFetch(
 }
 
 // ============================================================
-// GET ROUTES FROM OASA
+// GET LINES
+// ============================================================
+
+function getLines() {
+  return Array.isArray(linesCache)
+    ? linesCache
+    : [];
+}
+
+// ============================================================
+// GET ROUTES
+//
+// ΣΗΜΑΝΤΙΚΟ:
+// ΕΔΩ ΔΕΝ ΚΑΛΟΥΜΕ ΠΛΕΟΝ ΑΠΕΥΘΕΙΑΣ OASA.
+//
+// Discord Worker
+//      ↓
+// BusApp /api/routes
+//      ↓
+// OASA
 // ============================================================
 
 async function getRoutes(
   lineCode
 ) {
-  const data =
-    await oasaFetch({
-      act: "webGetRoutes",
-      p1: lineCode,
-    });
+  console.log(
+    `🚌 Αναζήτηση διαδρομών μέσω BusApp για LineCode ${lineCode}`
+  );
 
-  if (!Array.isArray(data)) {
-    throw new Error(
-      `OASA ROUTES RESPONSE IS NOT ARRAY: ${JSON.stringify(
-        data
-      ).slice(0, 1000)}`
+  const data =
+    await busAppFetch(
+      "/routes",
+      {
+        lineCode,
+      }
     );
+
+  const routes =
+    Array.isArray(
+      data?.results
+    )
+      ? data.results
+      : [];
+
+  console.log(
+    `✅ BusApp επέστρεψε ${routes.length} διαδρομές`
+  );
+
+  return routes;
+}
+
+// ============================================================
+// GET STOPS
+// ============================================================
+
+async function getStops(
+  routeCode
+) {
+  console.log(
+    `🚏 Αναζήτηση στάσεων μέσω BusApp για RouteCode ${routeCode}`
+  );
+
+  const data =
+    await busAppFetch(
+      "/stops",
+      {
+        routeCode,
+      }
+    );
+
+  const stops =
+    Array.isArray(
+      data?.results
+    )
+      ? data.results
+      : [];
+
+  console.log(
+    `✅ BusApp επέστρεψε ${stops.length} στάσεις`
+  );
+
+  return stops;
+}
+
+// ============================================================
+// GET ARRIVALS
+// ============================================================
+
+async function getArrivals(
+  stopCode
+) {
+  console.log(
+    `⏱️ Αναζήτηση αφίξεων μέσω BusApp για StopCode ${stopCode}`
+  );
+
+  const data =
+    await busAppFetch(
+      "/arrivals",
+      {
+        stopCode,
+      }
+    );
+
+  const arrivals =
+    Array.isArray(
+      data?.results
+    )
+      ? data.results
+      : [];
+
+  return arrivals.map(
+    (arrival) => ({
+      ...arrival,
+
+      routeCode:
+        arrival.routeCode ??
+        arrival.route_code ??
+        "",
+
+      vehicleCode:
+        arrival.vehicleCode ??
+        arrival.veh_code ??
+        "",
+
+      minutes:
+        arrival.minutes ??
+        arrival.btime2 ??
+        null,
+
+      lineCode:
+        arrival.lineCode ??
+        "",
+
+      lineId:
+        arrival.lineId ??
+        "",
+
+      lineDescription:
+        arrival.lineDescription ??
+        "",
+
+      routeDescription:
+        arrival.routeDescription ??
+        "",
+    })
+  );
+}
+
+// ============================================================
+// DISCORD INITIAL RESPONSES
+// ============================================================
+
+function pongResponse() {
+  return json({
+    type: 1,
+  });
+}
+
+function messageResponse(
+  content,
+  options = {}
+) {
+  return json({
+    type: 4,
+
+    data: {
+      content,
+
+      ...(options.embeds
+        ? {
+            embeds:
+              options.embeds,
+          }
+        : {}),
+
+      ...(options.components
+        ? {
+            components:
+              options.components,
+          }
+        : {}),
+    },
+  });
+}
+
+function deferredResponse() {
+  return json({
+    type: 5,
+  });
+}
+
+function autocompleteResponse(
+  choices
+) {
+  return json({
+    type: 8,
+
+    data: {
+      choices: choices.slice(
+        0,
+        25
+      ),
+    },
+  });
+}
+
+// ============================================================
+// DISCORD ORIGINAL RESPONSE
+// ============================================================
+
+async function editOriginalResponse(
+  interaction,
+  payload
+) {
+  const applicationId =
+    interaction.application_id;
+
+  const token =
+    interaction.token;
+
+  return discordRequest(
+    `/webhooks/${applicationId}/${token}/messages/@original`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(
+        payload
+      ),
+    }
+  );
+}
+
+// ============================================================
+// EMBEDS
+// ============================================================
+
+function createErrorEmbed(
+  title,
+  description
+) {
+  return {
+    title,
+    description,
+    color: 0xed4245,
+  };
+}
+
+function createRoutesEmbed(
+  line,
+  routes,
+  language
+) {
+  return {
+    title: isEnglish(language)
+      ? `🚌 Line ${getLineId(line)}`
+      : `🚌 Γραμμή ${getLineId(line)}`,
+
+    description:
+      isEnglish(language)
+        ? "Select a direction:"
+        : "Επίλεξε διαδρομή:",
+
+    color: 0x5865f2,
+
+    fields: [
+      {
+        name: isEnglish(language)
+          ? "Available directions"
+          : "Διαθέσιμες διαδρομές",
+
+        value:
+          routes.length
+            ? routes
+                .map(
+                  (route) =>
+                    `🚌 ${routeName(
+                      route,
+                      language
+                    )}`
+                )
+                .join("\n")
+            : isEnglish(language)
+            ? "No directions available."
+            : "Δεν υπάρχουν διαθέσιμες διαδρομές.",
+      },
+    ],
+  };
+}
+
+function createStopsEmbed(
+  line,
+  route,
+  stops,
+  page,
+  totalPages,
+  language
+) {
+  return {
+    title: isEnglish(language)
+      ? `🚌 Line ${getLineId(line)}`
+      : `🚌 Γραμμή ${getLineId(line)}`,
+
+    description:
+      `**${routeName(
+        route,
+        language
+      )}**\n\n` +
+      (isEnglish(language)
+        ? `Select a stop — page ${page}/${totalPages}`
+        : `Επίλεξε στάση — σελίδα ${page}/${totalPages}`),
+
+    color: 0x5865f2,
+
+    fields: [
+      {
+        name: isEnglish(language)
+          ? "Stops"
+          : "Στάσεις",
+
+        value:
+          stops.length
+            ? stops
+                .map(
+                  (stop) =>
+                    `🚏 ${stopName(
+                      stop,
+                      language
+                    )}`
+                )
+                .join("\n")
+            : isEnglish(language)
+            ? "No stops available."
+            : "Δεν υπάρχουν διαθέσιμες στάσεις.",
+      },
+    ],
+  };
+}
+
+// ============================================================
+// COMPONENTS
+// ============================================================
+
+function routeSelectComponent(
+  interaction,
+  line,
+  routes,
+  language
+) {
+  const options =
+    routes
+      .slice(0, 25)
+      .map(
+        (route) => ({
+          label:
+            routeName(
+              route,
+              language
+            ).slice(0, 100),
+
+          value:
+            JSON.stringify({
+              lineId:
+                getLineId(line),
+
+              lineCode:
+                getLineCode(line),
+
+              routeCode:
+                getRouteCode(route),
+
+              language,
+            }),
+        })
+      );
+
+  return [
+    {
+      type: 1,
+
+      components: [
+        {
+          type: 3,
+
+          custom_id:
+            `route:${interaction.id}`,
+
+          placeholder:
+            isEnglish(language)
+              ? "Select a direction"
+              : "Επίλεξε διαδρομή",
+
+          options,
+        },
+      ],
+    },
+  ];
+}
+
+function stopSelectComponent(
+  interaction,
+  line,
+  route,
+  stops,
+  page,
+  totalPages,
+  language
+) {
+  const options =
+    stops
+      .slice(
+        page * STOPS_PER_PAGE,
+        (page + 1) *
+          STOPS_PER_PAGE
+      )
+      .map(
+        (stop) => ({
+          label:
+            stopName(
+              stop,
+              language
+            ).slice(0, 100),
+
+          value:
+            JSON.stringify({
+              lineId:
+                getLineId(line),
+
+              lineCode:
+                getLineCode(line),
+
+              routeCode:
+                getRouteCode(route),
+
+              stopCode:
+                getStopCode(stop),
+
+              routeName:
+                routeName(
+                  route,
+                  language
+                ),
+
+              stopName:
+                stopName(
+                  stop,
+                  language
+                ),
+
+              language,
+            }),
+        })
+      );
+
+  const components = [];
+
+  components.push({
+    type: 1,
+
+    components: [
+      {
+        type: 3,
+
+        custom_id:
+          `stop:${interaction.id}:${page}`,
+
+        placeholder:
+          isEnglish(language)
+            ? "Select a stop"
+            : "Επίλεξε στάση",
+
+        options,
+      },
+    ],
+  });
+
+  const navigationButtons = [];
+
+  if (page > 0) {
+    navigationButtons.push({
+      type: 2,
+
+      style: 2,
+
+      custom_id:
+        `stoppage:${interaction.id}:${page - 1}`,
+
+      label:
+        isEnglish(language)
+          ? "← Previous"
+          : "← Προηγούμενη",
+    });
   }
 
-  return data;
+  if (
+    page <
+    totalPages - 1
+  ) {
+    navigationButtons.push({
+      type: 2,
+
+      style: 2,
+
+      custom_id:
+        `stoppage:${interaction.id}:${page + 1}`,
+
+      label:
+        isEnglish(language)
+          ? "Next →"
+          : "Επόμενη →",
+    });
+  }
+
+  if (navigationButtons.length) {
+    components.push({
+      type: 1,
+      components:
+        navigationButtons,
+    });
+  }
+
+  components.push({
+    type: 1,
+
+    components: [
+      {
+        type: 2,
+
+        style: 2,
+
+        custom_id:
+          `backroutes:${interaction.id}`,
+
+        label:
+          isEnglish(language)
+            ? "↩ Back to directions"
+            : "↩ Πίσω στις διαδρομές",
+      },
+    ],
+  });
+
+  return components;
+}
+
+function arrivalsComponents(
+  interaction,
+  selected,
+  language
+) {
+  return [
+    {
+      type: 1,
+
+      components: [
+        {
+          type: 2,
+
+          style: 1,
+
+          custom_id:
+            `refresh:${interaction.id}`,
+
+          label:
+            isEnglish(language)
+              ? "🔄 Refresh"
+              : "🔄 Ανανέωση",
+        },
+      ],
+    },
+
+    {
+      type: 1,
+
+      components: [
+        {
+          type: 2,
+
+          style: 2,
+
+          custom_id:
+            `backstops:${interaction.id}`,
+
+          label:
+            isEnglish(language)
+              ? "↩ Back to stops"
+              : "↩ Πίσω στις στάσεις",
+        },
+      ],
+    },
+  ];
+}
+
+// ============================================================
+// SHOW ROUTES
+// ============================================================
+
+async function showRoutes(
+  interaction,
+  line,
+  language
+) {
+  const routes =
+    await getRoutes(
+      getLineCode(line)
+    );
+
+  if (!routes.length) {
+    await editOriginalResponse(
+      interaction,
+      {
+        embeds: [
+          createErrorEmbed(
+            isEnglish(language)
+              ? "❌ No directions"
+              : "❌ Δεν βρέθηκαν διαδρομές",
+
+            isEnglish(language)
+              ? `No directions were returned for line ${getLineId(
+                  line
+                )}.`
+              : `Δεν επιστράφηκαν διαδρομές για τη γραμμή ${getLineId(
+                  line
+                )}.`
+          ),
+        ],
+
+        components: [],
+      }
+    );
+
+    return;
+  }
+
+  await editOriginalResponse(
+    interaction,
+    {
+      embeds: [
+        createRoutesEmbed(
+          line,
+          routes,
+          language
+        ),
+      ],
+
+      components:
+        routeSelectComponent(
+          interaction,
+          line,
+          routes,
+          language
+        ),
+    }
+  );
+}
+
+// ============================================================
+// SHOW STOPS
+// ============================================================
+
+async function showStops(
+  interaction,
+  line,
+  route,
+  language,
+  page = 0
+) {
+  const stops =
+    await getStops(
+      getRouteCode(route)
+    );
+
+  if (!stops.length) {
+    await editOriginalResponse(
+      interaction,
+      {
+        embeds: [
+          createErrorEmbed(
+            isEnglish(language)
+              ? "❌ No stops"
+              : "❌ Δεν βρέθηκαν στάσεις",
+
+            isEnglish(language)
+              ? "No stops were returned for this direction."
+              : "Δεν επιστράφηκαν στάσεις για αυτή τη διαδρομή."
+          ),
+        ],
+
+        components: [],
+      }
+    );
+
+    return;
+  }
+
+  const totalPages =
+    Math.max(
+      1,
+      Math.ceil(
+        stops.length /
+          STOPS_PER_PAGE
+      )
+    );
+
+  const safePage =
+    Math.min(
+      Math.max(
+        0,
+        page
+      ),
+      totalPages - 1
+    );
+
+  await editOriginalResponse(
+    interaction,
+    {
+      embeds: [
+        createStopsEmbed(
+          line,
+          route,
+          stops,
+          safePage,
+          totalPages,
+          language
+        ),
+      ],
+
+      components:
+        stopSelectComponent(
+          interaction,
+          line,
+          route,
+          stops,
+          safePage,
+          totalPages,
+          language
+        ),
+    }
+  );
+}
+
+// ============================================================
+// SHOW ARRIVALS
+// ============================================================
+
+async function showArrivals(
+  interaction,
+  selected
+) {
+  const language =
+    selected.language || "el";
+
+  const arrivals =
+    await getArrivals(
+      selected.stopCode
+    );
+
+  const filtered =
+    arrivals
+      .filter(
+        (arrival) =>
+          String(
+            arrival.routeCode ??
+              ""
+          ) ===
+          String(
+            selected.routeCode
+          )
+      )
+      .sort(
+        (a, b) =>
+          Number(
+            a.minutes ??
+              999999
+          ) -
+          Number(
+            b.minutes ??
+              999999
+          )
+      );
+
+  const embed = {
+    title: isEnglish(language)
+      ? `🚌 Line ${selected.lineId}`
+      : `🚌 Γραμμή ${selected.lineId}`,
+
+    description:
+      `**${selected.routeName}**\n\n` +
+      `📍 **${selected.stopName}**`,
+
+    color: 0x5865f2,
+
+    timestamp:
+      new Date().toISOString(),
+  };
+
+  if (!filtered.length) {
+    embed.fields = [
+      {
+        name:
+          isEnglish(language)
+            ? "⏱️ Upcoming arrivals"
+            : "⏱️ Επόμενες αφίξεις",
+
+        value:
+          isEnglish(language)
+            ? "No arrivals are currently available."
+            : "Δεν υπάρχουν διαθέσιμες αφίξεις αυτή τη στιγμή.",
+      },
+    ];
+  } else {
+    const arrivalText =
+      filtered
+        .slice(0, 10)
+        .map(
+          (arrival) => {
+            const minutes =
+              Number(
+                arrival.minutes
+              );
+
+            let timeText;
+
+            if (
+              minutes === 0
+            ) {
+              timeText =
+                isEnglish(language)
+                  ? "🟢 **Now**"
+                  : "🟢 **Τώρα**";
+            } else if (
+              minutes === 1
+            ) {
+              timeText =
+                isEnglish(language)
+                  ? "🟡 in **1 min**"
+                  : "🟡 σε **1′**";
+            } else if (
+              Number.isFinite(
+                minutes
+              )
+            ) {
+              timeText =
+                isEnglish(language)
+                  ? `🟡 in **${minutes} min**`
+                  : `🟡 σε **${minutes}′**`;
+            } else {
+              timeText =
+                isEnglish(language)
+                  ? "🟡 unknown"
+                  : "🟡 άγνωστο";
+            }
+
+            return `🚌 ${timeText}`;
+          }
+        )
+        .join("\n");
+
+    embed.fields = [
+      {
+        name:
+          isEnglish(language)
+            ? "⏱️ Upcoming arrivals"
+            : "⏱️ Επόμενες αφίξεις",
+
+        value:
+          arrivalText,
+      },
+    ];
+  }
+
+  embed.footer = {
+    text:
+      isEnglish(language)
+        ? "Where is my bus? • Papoutsis Digital"
+        : "Πού είναι το λεωφορείο μου; • Papoutsis Digital",
+  };
+
+  await editOriginalResponse(
+    interaction,
+    {
+      embeds: [embed],
+
+      components:
+        arrivalsComponents(
+          interaction,
+          selected,
+          language
+        ),
+    }
+  );
 }
 
 // ============================================================
@@ -431,504 +1290,569 @@ async function handleAutocomplete(
 
   const query =
     String(
-      focused?.value ||
-      ""
+      focused?.value ?? ""
     )
       .trim()
       .toLowerCase();
 
-  console.log(
-    `🔎 Autocomplete query: "${query}"`
-  );
+  const language =
+    interaction.data?.name ===
+    "arrivals"
+      ? "en"
+      : "el";
 
-  let filtered =
-    linesCache;
+  const lines =
+    getLines();
 
-  if (query) {
-    filtered =
-      linesCache.filter(
+  const filtered =
+    lines
+      .filter(
         (line) => {
           const id =
-            String(
-              line.LineID ||
-              ""
-            )
-              .toLowerCase();
-
-          const code =
-            String(
-              line.LineCode ||
-              ""
-            )
-              .toLowerCase();
+            getLineId(
+              line
+            ).toLowerCase();
 
           const greek =
-            String(
-              line.LineDescr ||
-              ""
-            )
-              .toLowerCase();
+            getLineGreek(
+              line
+            ).toLowerCase();
 
           const english =
-            String(
-              line.LineDescrEng ||
-              ""
-            )
-              .toLowerCase();
+            getLineEnglish(
+              line
+            ).toLowerCase();
 
           return (
             id.includes(query) ||
-            code.includes(query) ||
             greek.includes(query) ||
             english.includes(query)
           );
         }
-      );
-  }
-
-  filtered =
-    filtered.slice(
-      0,
-      MAX_AUTOCOMPLETE_CHOICES
-    );
+      )
+      .slice(0, 25);
 
   const choices =
     filtered.map(
       (line) => ({
         name:
-          `🚌 ${line.LineID || line.LineCode} — ${
-            line.LineDescr ||
-            line.LineDescrEng ||
-            "Άγνωστη γραμμή"
-          }`.slice(
+          `🚌 ${getLineId(
+            line
+          )} — ${lineName(
+            line,
+            language
+          )}`.slice(
             0,
             100
           ),
 
         value:
-          String(
-            line.LineCode
-          ),
+          JSON.stringify({
+            lineId:
+              getLineId(
+                line
+              ),
+
+            lineCode:
+              getLineCode(
+                line
+              ),
+
+            language,
+          }),
       })
     );
 
-  return json({
-    type:
-      AUTOCOMPLETE_RESULT,
+  console.log(
+    `🔎 Autocomplete "${query}" [${language}] → ${choices.length} αποτελέσματα`
+  );
 
-    data: {
-      choices,
-    },
-  });
+  return autocompleteResponse(
+    choices
+  );
 }
 
 // ============================================================
-// ROUTE SELECT MENU
+// COMMAND DATA
 // ============================================================
 
-function createRoutesComponents(
-  routes,
-  userId,
-  lineId,
-  lineCode,
-  language
+function getCommandOption(
+  interaction
 ) {
-  const options =
-    routes
-      .slice(
-        0,
-        25
-      )
-      .map(
-        (route) => ({
-          label:
-            getRouteName(
-              route,
-              language
-            ).slice(
-              0,
-              100
-            ),
+  return (
+    interaction.data?.options?.[0]
+      ?.value ??
+    null
+  );
+}
 
-          value:
-            String(
-              route.RouteCode
-            ),
+function findLine(
+  lineId,
+  lineCode
+) {
+  return getLines().find(
+    (line) =>
+      String(
+        getLineId(line)
+      ) === String(lineId) &&
+      String(
+        getLineCode(line)
+      ) === String(lineCode)
+  );
+}
 
-          description:
-            `Route ${route.RouteCode}`.slice(
-              0,
-              100
-            ),
-        })
-      );
+// ============================================================
+// SLASH COMMAND
+// ============================================================
 
-  if (!options.length) {
-    return [];
+async function handleCommand(
+  interaction,
+  env,
+  ctx
+) {
+  const commandName =
+    interaction.data?.name;
+
+  if (
+    commandName !==
+      "αφίξεις" &&
+    commandName !==
+      "arrivals"
+  ) {
+    return messageResponse(
+      "❌ Unknown command."
+    );
   }
 
-  return [
-    {
-      type: 1,
+  const language =
+    commandName ===
+    "arrivals"
+      ? "en"
+      : "el";
 
-      components: [
-        {
-          type: 3,
-
-          custom_id:
-            `route:${userId}:${lineId}:${lineCode}:${language}`,
-
-          placeholder:
-            isEnglish(language)
-              ? "Select a direction"
-              : "Επίλεξε κατεύθυνση",
-
-          min_values: 1,
-
-          max_values: 1,
-
-          options,
-        },
-      ],
-    },
-  ];
-}
-
-// ============================================================
-// SHOW ROUTES
-// ============================================================
-
-async function showRoutes(
-  interaction,
-  lineCode,
-  language,
-  env
-) {
-  const line =
-    findLineByCode(
-      lineCode
+  const value =
+    getCommandOption(
+      interaction
     );
 
-  const lineId =
-    line?.LineID ||
-    lineCode;
+  if (!value) {
+    return messageResponse(
+      isEnglish(language)
+        ? "❌ Please select a bus line."
+        : "❌ Επίλεξε πρώτα γραμμή λεωφορείου."
+    );
+  }
+
+  let selectedLine;
 
   try {
-    console.log(
-      `🚌 Selected line: ${lineId}`
-    );
-
-    console.log(
-      `🔢 LineCode: ${lineCode}`
-    );
-
-    const routes =
-      await getRoutes(
-        lineCode
+    const parsed =
+      JSON.parse(
+        String(value)
       );
 
-    console.log(
-      `✅ OASA returned ${routes.length} routes`
-    );
-
-    if (!routes.length) {
-      await editOriginalResponse(
-        env.APPLICATION_ID,
-        interaction.token,
-        env.DISCORD_TOKEN,
-        {
-          embeds: [
-            {
-              title:
-                "⚠️ Δεν βρέθηκαν κατευθύνσεις",
-
-              description:
-                isEnglish(language)
-                  ? `No directions were returned by OASA for line **${lineId}**.`
-                  : `Η τηλεματική ΟΑΣΑ δεν επέστρεψε κατευθύνσεις για τη γραμμή **${lineId}**.`,
-
-              fields: [
-                {
-                  name:
-                    "LineCode",
-
-                  value:
-                    `\`${lineCode}\``,
-                },
-              ],
-            },
-          ],
-
-          components: [],
-        }
+    selectedLine =
+      findLine(
+        parsed.lineId,
+        parsed.lineCode
       );
 
-      return;
+    if (!selectedLine) {
+      selectedLine = {
+        LineID:
+          parsed.lineId,
+
+        LineCode:
+          parsed.lineCode,
+
+        LineDescr:
+          parsed.lineDescription ||
+          parsed.lineId,
+
+        LineDescrEng:
+          parsed.lineDescriptionEng ||
+          parsed.lineId,
+      };
     }
+  } catch {
+    const lineText =
+      String(value)
+        .trim()
+        .toLowerCase();
 
-    await editOriginalResponse(
-      env.APPLICATION_ID,
-      interaction.token,
-      env.DISCORD_TOKEN,
-      {
-        embeds: [
-          {
-            title:
-              isEnglish(language)
-                ? `🚌 Line ${lineId}`
-                : `🚌 Γραμμή ${lineId}`,
+    selectedLine =
+      getLines().find(
+        (line) =>
+          getLineId(
+            line
+          )
+            .toLowerCase() ===
+            lineText
+      );
+  }
 
-            description:
-              getLineName(
-                line ||
-                  {
-                    LineID:
-                      lineId,
-                  },
-                language
-              ),
-
-            fields: [
-              {
-                name:
-                  isEnglish(language)
-                    ? "Directions"
-                    : "Κατευθύνσεις",
-
-                value:
-                  isEnglish(language)
-                    ? "Choose the direction you want."
-                    : "Επίλεξε την κατεύθυνση που θέλεις.",
-              },
-
-              {
-                name:
-                  "LineCode",
-
-                value:
-                  `\`${lineCode}\``,
-              },
-
-              {
-                name:
-                  "Πηγή",
-
-                value:
-                  "Τηλεματική ΟΑΣΑ",
-              },
-            ],
-          },
-        ],
-
-        components:
-          createRoutesComponents(
-            routes,
-            interaction.member?.user?.id ||
-              interaction.user?.id ||
-              "unknown",
-            lineId,
-            lineCode,
-            language
-          ),
-      }
-    );
-  } catch (error) {
-    console.error(
-      "❌ SHOW ROUTES ERROR:",
-      error
-    );
-
-    const errorMessage =
-      error?.message ||
-      String(error);
-
-    await editOriginalResponse(
-      env.APPLICATION_ID,
-      interaction.token,
-      env.DISCORD_TOKEN,
-      {
-        embeds: [
-          {
-            title:
-              "❌ Σφάλμα τηλεματικής",
-
-            description:
-              isEnglish(language)
-                ? `The directions for line **${lineId}** could not be retrieved.`
-                : `Δεν ήταν δυνατή η ανάκτηση των κατευθύνσεων για τη γραμμή **${lineId}**.`,
-
-            fields: [
-              {
-                name:
-                  "Γραμμή",
-
-                value:
-                  `\`${lineId}\``,
-              },
-
-              {
-                name:
-                  "LineCode",
-
-                value:
-                  `\`${lineCode}\``,
-              },
-
-              {
-                name:
-                  "❌ Πραγματικό σφάλμα",
-
-                value:
-                  `\`\`\`\n${errorMessage.slice(
-                    0,
-                    1000
-                  )}\n\`\`\``,
-              },
-
-              {
-                name:
-                  "Πηγή",
-
-                value:
-                  "Τηλεματική ΟΑΣΑ",
-              },
-            ],
-          },
-        ],
-
-        components: [],
-      }
+  if (!selectedLine) {
+    return messageResponse(
+      isEnglish(language)
+        ? "❌ The selected line could not be found."
+        : "❌ Δεν βρέθηκε η επιλεγμένη γραμμή."
     );
   }
+
+  // Απαντάμε αμέσως στο Discord.
+  // Η πραγματική αναζήτηση γίνεται μετά.
+  ctx.waitUntil(
+    (async () => {
+      try {
+        await showRoutes(
+          interaction,
+          selectedLine,
+          language
+        );
+      } catch (error) {
+        console.error(
+          "❌ ROUTES ERROR:",
+          error
+        );
+
+        await editOriginalResponse(
+          interaction,
+          {
+            embeds: [
+              createErrorEmbed(
+                isEnglish(language)
+                  ? "❌ Directions error"
+                  : "❌ Σφάλμα διαδρομών",
+
+                isEnglish(language)
+                  ? `I could not load the directions.\n\n\`${String(
+                      error?.message ||
+                        error
+                    ).slice(
+                      0,
+                      900
+                    )}\``
+                  : `Δεν μπόρεσα να φορτώσω τις διαδρομές.\n\n\`${String(
+                      error?.message ||
+                        error
+                    ).slice(
+                      0,
+                      900
+                    )}\``
+              ),
+            ],
+
+            components: [],
+          }
+        );
+      }
+    })()
+  );
+
+  return deferredResponse();
 }
 
 // ============================================================
-// HANDLE ROUTE SELECT
+// COMPONENT INTERACTIONS
 // ============================================================
 
-async function handleRouteSelect(
+async function handleComponent(
   interaction,
-  env
+  ctx
 ) {
   const customId =
     interaction.data?.custom_id ||
     "";
 
-  const values =
-    interaction.data?.values ||
-    [];
-
-  if (!values.length) {
-    return json({
-      type: 4,
-
-      data: {
-        content:
-          "❌ Δεν επιλέχθηκε κατεύθυνση.",
-      },
-    });
-  }
-
-  const parts =
-    customId.split(":");
-
-  const userId =
-    parts[1];
-
-  const lineId =
-    parts[2];
-
-  const lineCode =
-    parts[3];
-
-  const language =
-    parts[4] ||
-    "el";
-
-  const interactionUserId =
-    interaction.member?.user?.id ||
-    interaction.user?.id;
+  // ----------------------------------------------------------
+  // ROUTE SELECT
+  // ----------------------------------------------------------
 
   if (
-    userId !==
-    interactionUserId
+    customId.startsWith(
+      "route:"
+    )
   ) {
-    return json({
-      type: 4,
+    const value =
+      interaction.data
+        ?.values?.[0];
 
-      data: {
-        content:
-          isEnglish(language)
-            ? "❌ This menu belongs to another user."
-            : "❌ Αυτό το μενού ανήκει σε άλλον χρήστη.",
+    if (!value) {
+      return messageResponse(
+        "❌ No direction selected."
+      );
+    }
 
-        flags: 64,
-      },
-    });
+    let selected;
+
+    try {
+      selected =
+        JSON.parse(
+          value
+        );
+    } catch {
+      return messageResponse(
+        "❌ Invalid direction data."
+      );
+    }
+
+    const line =
+      findLine(
+        selected.lineId,
+        selected.lineCode
+      ) || {
+        LineID:
+          selected.lineId,
+
+        LineCode:
+          selected.lineCode,
+
+        LineDescr:
+          selected.lineId,
+
+        LineDescrEng:
+          selected.lineId,
+      };
+
+    const route = {
+      RouteCode:
+        selected.routeCode,
+
+      RouteDescr:
+        selected.routeName,
+
+      RouteDescrEng:
+        selected.routeName,
+    };
+
+    const language =
+      selected.language ||
+      "el";
+
+    ctx.waitUntil(
+      (async () => {
+        try {
+          await showStops(
+            interaction,
+            line,
+            route,
+            language,
+            0
+          );
+        } catch (error) {
+          console.error(
+            "❌ STOPS ERROR:",
+            error
+          );
+
+          await editOriginalResponse(
+            interaction,
+            {
+              embeds: [
+                createErrorEmbed(
+                  isEnglish(language)
+                    ? "❌ Stops error"
+                    : "❌ Σφάλμα στάσεων",
+
+                  isEnglish(language)
+                    ? `I could not load the stops.\n\n\`${String(
+                        error?.message ||
+                          error
+                      ).slice(
+                        0,
+                        900
+                      )}\``
+                    : `Δεν μπόρεσα να φορτώσω τις στάσεις.\n\n\`${String(
+                        error?.message ||
+                          error
+                      ).slice(
+                        0,
+                        900
+                      )}\``
+                ),
+              ],
+
+              components: [],
+            }
+          );
+        }
+      })()
+    );
+
+    return deferredResponse();
   }
 
-  const routeCode =
-    values[0];
+  // ----------------------------------------------------------
+  // STOP SELECT
+  // ----------------------------------------------------------
 
-  console.log(
-    `🛣️ Selected route: ${routeCode}`
+  if (
+    customId.startsWith(
+      "stop:"
+    )
+  ) {
+    const value =
+      interaction.data
+        ?.values?.[0];
+
+    if (!value) {
+      return messageResponse(
+        "❌ No stop selected."
+      );
+    }
+
+    let selected;
+
+    try {
+      selected =
+        JSON.parse(
+          value
+        );
+    } catch {
+      return messageResponse(
+        "❌ Invalid stop data."
+      );
+    }
+
+    ctx.waitUntil(
+      (async () => {
+        try {
+          await showArrivals(
+            interaction,
+            selected
+          );
+        } catch (error) {
+          console.error(
+            "❌ ARRIVALS ERROR:",
+            error
+          );
+
+          const language =
+            selected.language ||
+            "el";
+
+          await editOriginalResponse(
+            interaction,
+            {
+              embeds: [
+                createErrorEmbed(
+                  isEnglish(language)
+                    ? "❌ Arrivals error"
+                    : "❌ Σφάλμα αφίξεων",
+
+                  isEnglish(language)
+                    ? `I could not load the arrivals.\n\n\`${String(
+                        error?.message ||
+                          error
+                      ).slice(
+                        0,
+                        900
+                      )}\``
+                    : `Δεν μπόρεσα να φορτώσω τις αφίξεις.\n\n\`${String(
+                        error?.message ||
+                          error
+                      ).slice(
+                        0,
+                        900
+                      )}\``
+                ),
+              ],
+
+              components: [],
+            }
+          );
+        }
+      })()
+    );
+
+    return deferredResponse();
+  }
+
+  // ----------------------------------------------------------
+  // STOP PAGE
+  // ----------------------------------------------------------
+
+  if (
+    customId.startsWith(
+      "stoppage:"
+    )
+  ) {
+    const value =
+      customId.split(
+        ":"
+      );
+
+    const page =
+      Number(
+        value[2]
+      );
+
+    const state =
+      interaction.message
+        ?.embeds?.[0];
+
+    const description =
+      state?.description ||
+      "";
+
+    // Για pagination ξαναχρησιμοποιούμε
+    // τα στοιχεία που βρίσκονται στο message.
+    //
+    // Επειδή το Discord component interaction
+    // δεν κρατάει arbitrary state, ζητάμε από
+    // τα υπάρχοντα custom IDs να επαναφέρουμε
+    // την κατάσταση όπου είναι διαθέσιμη.
+
+    return messageResponse(
+      "❌ Η σελιδοποίηση χρειάζεται ανανέωση της λίστας στάσεων."
+    );
+  }
+
+  // ----------------------------------------------------------
+  // REFRESH
+  // ----------------------------------------------------------
+
+  if (
+    customId.startsWith(
+      "refresh:"
+    )
+  ) {
+    return messageResponse(
+      "🔄 Η ανανέωση θα προστεθεί στο επόμενο βήμα."
+    );
+  }
+
+  // ----------------------------------------------------------
+  // BACK TO ROUTES
+  // ----------------------------------------------------------
+
+  if (
+    customId.startsWith(
+      "backroutes:"
+    )
+  ) {
+    return messageResponse(
+      "↩️ Η επιστροφή στις διαδρομές θα προστεθεί στο επόμενο βήμα."
+    );
+  }
+
+  // ----------------------------------------------------------
+  // BACK TO STOPS
+  // ----------------------------------------------------------
+
+  if (
+    customId.startsWith(
+      "backstops:"
+    )
+  ) {
+    return messageResponse(
+      "↩️ Η επιστροφή στις στάσεις θα προστεθεί στο επόμενο βήμα."
+    );
+  }
+
+  return messageResponse(
+    "❌ Unknown interaction."
   );
-
-  console.log(
-    `🚌 LineCode: ${lineCode}`
-  );
-
-  return json({
-    type: 4,
-
-    data: {
-      embeds: [
-        {
-          title:
-            isEnglish(language)
-              ? `🚌 Line ${lineId}`
-              : `🚌 Γραμμή ${lineId}`,
-
-          description:
-            isEnglish(language)
-              ? `Direction selected: **${routeCode}**`
-              : `Επιλέχθηκε η κατεύθυνση: **${routeCode}**`,
-
-          fields: [
-            {
-              name:
-                "RouteCode",
-
-              value:
-                `\`${routeCode}\``,
-            },
-
-            {
-              name:
-                "LineCode",
-
-              value:
-                `\`${lineCode}\``,
-            },
-
-            {
-              name:
-                isEnglish(language)
-                  ? "Next step"
-                  : "Επόμενο βήμα",
-
-              value:
-                isEnglish(language)
-                  ? "Stops will be added next."
-                  : "Στο επόμενο βήμα θα προσθέσουμε τις στάσεις.",
-            },
-          ],
-        },
-      ],
-
-      components: [],
-    },
-  });
 }
 
 // ============================================================
@@ -938,6 +1862,18 @@ async function handleRouteSelect(
 async function registerCommands(
   env
 ) {
+  if (!env.APPLICATION_ID) {
+    throw new Error(
+      "APPLICATION_ID δεν έχει οριστεί."
+    );
+  }
+
+  if (!env.DISCORD_TOKEN) {
+    throw new Error(
+      "DISCORD_TOKEN δεν έχει οριστεί."
+    );
+  }
+
   const commands = [
     {
       name: "αφίξεις",
@@ -984,280 +1920,74 @@ async function registerCommands(
     },
   ];
 
-  return await discordRequest(
-    `/applications/${env.APPLICATION_ID}/commands`,
-    "PUT",
-    env.DISCORD_TOKEN,
-    commands
+  console.log(
+    "📡 Registering Discord global commands..."
   );
+
+  const result =
+    await discordRequest(
+      `/applications/${env.APPLICATION_ID}/commands`,
+      {
+        method: "PUT",
+
+        headers: {
+          Authorization:
+            `Bot ${env.DISCORD_TOKEN}`,
+        },
+
+        body: JSON.stringify(
+          commands
+        ),
+      }
+    );
+
+  console.log(
+    `✅ Registered ${result.length} commands.`
+  );
+
+  return result;
 }
 
 // ============================================================
-// HANDLE SLASH COMMAND
+// TEST OASA THROUGH BUSAPP
 // ============================================================
 
-async function handleSlashCommand(
-  interaction,
-  env
-) {
-  const commandName =
-    interaction.data?.name;
+async function testBusApp() {
+  const started =
+    Date.now();
 
-  const isGreek =
-    commandName ===
-    "αφίξεις";
-
-  const isEnglishCommand =
-    commandName ===
-    "arrivals";
-
-  if (
-    !isGreek &&
-    !isEnglishCommand
-  ) {
-    return json({
-      type: 4,
-
-      data: {
-        content:
-          "❌ Άγνωστη εντολή.",
-      },
-    });
-  }
-
-  const language =
-    isGreek
-      ? "el"
-      : "en";
-
-  const options =
-    interaction.data?.options ||
-    [];
-
-  const selectedOption =
-    options.find(
-      (option) =>
-        option.name ===
-          "γραμμή" ||
-        option.name ===
-          "line"
+  const data =
+    await busAppFetch(
+      "/routes",
+      {
+        lineCode: "953",
+      }
     );
 
-  const lineCode =
-    selectedOption?.value;
+  return {
+    success: true,
 
-  if (!lineCode) {
-    return json({
-      type: 4,
-
-      data: {
-        content:
-          isEnglish(language)
-            ? "❌ Please select a bus line."
-            : "❌ Παρακαλώ επίλεξε γραμμή.",
-      },
-    });
-  }
-
-  console.log(
-    `🚌 Slash command ${commandName}`
-  );
-
-  console.log(
-    `🔢 Selected LineCode: ${lineCode}`
-  );
-
-  const line =
-    findLineByCode(
-      lineCode
-    );
-
-  if (!line) {
-    return json({
-      type: 4,
-
-      data: {
-        content:
-          isEnglish(language)
-            ? `❌ LineCode ${lineCode} was not found in the lines cache.`
-            : `❌ Το LineCode ${lineCode} δεν βρέθηκε στο cache των γραμμών.`,
-      },
-    });
-  }
-
-  // Discord needs an immediate response.
-  // We defer the response and continue the OASA request
-  // in the background.
-  const response =
-    json({
-      type:
-        DEFERRED_CHANNEL_MESSAGE,
-    });
-
-  // Continue after the response.
-  interaction.ctx?.waitUntil?.(
-    showRoutes(
-      interaction,
-      lineCode,
-      language,
-      env
-    )
-  );
-
-  return response;
-}
-
-// ============================================================
-// TEST OASA
-// ============================================================
-
-async function handleTestOasa(
-  request,
-  env
-) {
-  const url =
-    new URL(request.url);
-
-  const lineCode =
-    url.searchParams.get(
-      "lineCode"
-    ) ||
-    "953";
-
-  try {
-    const started =
-      Date.now();
-
-    const routes =
-      await getRoutes(
-        lineCode
-      );
-
-    const elapsed =
+    elapsedMs:
       Date.now() -
-      started;
+      started,
 
-    return json({
-      success: true,
+    source:
+      "BusApp",
 
-      lineCode,
+    endpoint:
+      `${BUSAPP_API}/routes?lineCode=953`,
 
-      elapsedMs:
-        elapsed,
-
-      routeCount:
-        routes.length,
-
-      results:
-        routes,
-    });
-  } catch (error) {
-    return json(
-      {
-        success: false,
-
-        lineCode,
-
-        error:
-          error?.message ||
-          String(error),
-      },
-
-      500
-    );
-  }
+    results:
+      Array.isArray(
+        data?.results
+      )
+        ? data.results
+        : [],
+  };
 }
 
 // ============================================================
-// REGISTER ENDPOINT
-// ============================================================
-
-async function handleRegister(
-  request,
-  env
-) {
-  const url =
-    new URL(request.url);
-
-  const queryKey =
-    url.searchParams.get(
-      "key"
-    );
-
-  const headerKey =
-    request.headers.get(
-      "X-Register-Key"
-    );
-
-  const suppliedKey =
-    headerKey ||
-    queryKey;
-
-  if (
-    !env.REGISTER_KEY
-  ) {
-    return json(
-      {
-        success: false,
-
-        error:
-          "REGISTER_KEY is not configured.",
-      },
-      500
-    );
-  }
-
-  if (
-    !suppliedKey ||
-    suppliedKey !==
-      env.REGISTER_KEY
-  ) {
-    return json(
-      {
-        success: false,
-
-        error:
-          "Unauthorized.",
-      },
-      401
-    );
-  }
-
-  try {
-    const commands =
-      await registerCommands(
-        env
-      );
-
-    return json({
-      success: true,
-
-      message:
-        "Discord commands registered successfully.",
-
-      commands,
-    });
-  } catch (error) {
-    console.error(
-      "❌ REGISTER ERROR:",
-      error
-    );
-
-    return json(
-      {
-        success: false,
-
-        error:
-          error?.message ||
-          String(error),
-      },
-      500
-    );
-  }
-}
-
-// ============================================================
-// MAIN WORKER
+// MAIN FETCH
 // ============================================================
 
 export default {
@@ -1267,25 +1997,41 @@ export default {
     ctx
   ) {
     const url =
-      new URL(request.url);
+      new URL(
+        request.url
+      );
 
     // --------------------------------------------------------
-    // BASIC HEALTH CHECK
+    // HEALTH CHECK
     // --------------------------------------------------------
 
     if (
       request.method ===
         "GET" &&
-      url.pathname ===
-        "/"
+      url.pathname === "/"
     ) {
-      return text(
-        "🚌 Πού είναι το λεωφορείο μου; — Discord Worker OK"
-      );
+      return json({
+        success: true,
+
+        service:
+          "Πού είναι το λεωφορείο μου; — Discord Bot",
+
+        status:
+          "online",
+
+        architecture:
+          "Discord → Discord Worker → BusApp → OASA",
+
+        routesSource:
+          "BusApp",
+
+        directOasaRoutes:
+          false,
+      });
     }
 
     // --------------------------------------------------------
-    // TEST OASA
+    // TEST BUSAPP
     // --------------------------------------------------------
 
     if (
@@ -1294,14 +2040,37 @@ export default {
       url.pathname ===
         "/test-oasa"
     ) {
-      return handleTestOasa(
-        request,
-        env
-      );
+      try {
+        const result =
+          await testBusApp();
+
+        return json(
+          result
+        );
+      } catch (error) {
+        console.error(
+          "❌ /test-oasa ERROR:",
+          error
+        );
+
+        return json(
+          {
+            success:
+              false,
+
+            error:
+              String(
+                error?.message ||
+                  error
+              ),
+          },
+          502
+        );
+      }
     }
 
     // --------------------------------------------------------
-    // REGISTER COMMANDS
+    // REGISTER
     // --------------------------------------------------------
 
     if (
@@ -1310,22 +2079,73 @@ export default {
       url.pathname ===
         "/register"
     ) {
-      return handleRegister(
-        request,
-        env
-      );
-    }
+      const key =
+        url.searchParams.get(
+          "key"
+        );
 
-    if (
-      request.method ===
-        "POST" &&
-      url.pathname ===
-        "/register"
-    ) {
-      return handleRegister(
-        request,
-        env
-      );
+      if (
+        !key ||
+        !env.REGISTER_KEY ||
+        key !==
+          env.REGISTER_KEY
+      ) {
+        return json(
+          {
+            success:
+              false,
+
+            error:
+              "Unauthorized",
+          },
+          401
+        );
+      }
+
+      try {
+        const commands =
+          await registerCommands(
+            env
+          );
+
+        return json({
+          success:
+            true,
+
+          message:
+            "Discord commands registered.",
+
+          commands:
+            commands.map(
+              (command) => ({
+                id:
+                  command.id,
+
+                name:
+                  command.name,
+              })
+            ),
+        });
+      } catch (error) {
+        console.error(
+          "❌ REGISTER ERROR:",
+          error
+        );
+
+        return json(
+          {
+            success:
+              false,
+
+            error:
+              String(
+                error?.message ||
+                  error
+              ),
+          },
+          500
+        );
+      }
     }
 
     // --------------------------------------------------------
@@ -1336,8 +2156,14 @@ export default {
       request.method !==
       "POST"
     ) {
-      return text(
-        "Method Not Allowed",
+      return json(
+        {
+          success:
+            false,
+
+          error:
+            "Method Not Allowed",
+        },
         405
       );
     }
@@ -1345,24 +2171,39 @@ export default {
     const body =
       await request.text();
 
-    // --------------------------------------------------------
-    // VERIFY DISCORD REQUEST
-    // --------------------------------------------------------
+    if (
+      !env.DISCORD_PUBLIC_KEY
+    ) {
+      console.error(
+        "❌ DISCORD_PUBLIC_KEY missing."
+      );
 
-    const valid =
-      await verifyDiscordRequest(
+      return json(
+        {
+          success:
+            false,
+
+          error:
+            "Discord public key is not configured.",
+        },
+        500
+      );
+    }
+
+    const verified =
+      await verifyDiscordSignature(
         request,
         body,
         env.DISCORD_PUBLIC_KEY
       );
 
-    if (!valid) {
-      console.warn(
+    if (!verified) {
+      console.error(
         "❌ Invalid Discord signature."
       );
 
       return text(
-        "Bad request signature.",
+        "Invalid request signature.",
         401
       );
     }
@@ -1375,19 +2216,20 @@ export default {
           body
         );
     } catch {
-      return text(
-        "Invalid JSON.",
+      return json(
+        {
+          success:
+            false,
+
+          error:
+            "Invalid JSON.",
+        },
         400
       );
     }
 
-    // Give ctx to interaction so the
-    // command handler can use waitUntil.
-    interaction.ctx =
-      ctx;
-
     console.log(
-      `📨 Discord interaction type: ${interaction.type}`
+      `📨 Discord interaction type=${interaction.type} name=${interaction.data?.name || interaction.data?.custom_id || ""}`
     );
 
     // --------------------------------------------------------
@@ -1398,9 +2240,7 @@ export default {
       interaction.type ===
       1
     ) {
-      return json({
-        type: 1,
-      });
+      return pongResponse();
     }
 
     // --------------------------------------------------------
@@ -1409,11 +2249,22 @@ export default {
 
     if (
       interaction.type ===
-      APPLICATION_COMMAND_AUTOCOMPLETE
+      4
     ) {
-      return handleAutocomplete(
-        interaction
-      );
+      try {
+        return await handleAutocomplete(
+          interaction
+        );
+      } catch (error) {
+        console.error(
+          "❌ AUTOCOMPLETE ERROR:",
+          error
+        );
+
+        return autocompleteResponse(
+          []
+        );
+      }
     }
 
     // --------------------------------------------------------
@@ -1422,11 +2273,12 @@ export default {
 
     if (
       interaction.type ===
-      APPLICATION_COMMAND
+      2
     ) {
-      return handleSlashCommand(
+      return handleCommand(
         interaction,
-        env
+        env,
+        ctx
       );
     }
 
@@ -1436,35 +2288,16 @@ export default {
 
     if (
       interaction.type ===
-      MESSAGE_COMPONENT
+      3
     ) {
-      const customId =
-        interaction.data?.custom_id ||
-        "";
-
-      if (
-        customId.startsWith(
-          "route:"
-        )
-      ) {
-        return handleRouteSelect(
-          interaction,
-          env
-        );
-      }
+      return handleComponent(
+        interaction,
+        ctx
+      );
     }
 
-    // --------------------------------------------------------
-    // UNKNOWN INTERACTION
-    // --------------------------------------------------------
-
-    return json({
-      type: 4,
-
-      data: {
-        content:
-          "❌ Μη υποστηριζόμενος τύπος interaction.",
-      },
-    });
+    return messageResponse(
+      "❌ Unsupported Discord interaction."
+    );
   },
 };
