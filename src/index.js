@@ -1,8 +1,11 @@
 const OASA_LINES_URL =
   "https://telematics.oasa.gr/api/?act=webGetLines";
 
-const CACHE_KEY_URL =
-  "https://busappbotdiscord.papoutsiscostas98.gr/__cache/oasa-lines";
+const OASA_ROUTES_URL =
+  "https://telematics.oasa.gr/api/?act=webGetRoutes&p1=";
+
+const CACHE_BASE_URL =
+  "https://busappbotdiscord.papoutsiscostas98.gr/__oasa-cache/";
 
 const CACHE_TTL = 300; // 5 λεπτά
 
@@ -18,8 +21,16 @@ const COMMANDS = [
         required: true,
         autocomplete: true,
       },
+      {
+        type: 3,
+        name: "κατεύθυνση",
+        description: "Κατεύθυνση λεωφορείου",
+        required: true,
+        autocomplete: true,
+      },
     ],
   },
+
   {
     name: "arrivals",
     description: "See upcoming bus arrivals at a stop.",
@@ -31,39 +42,82 @@ const COMMANDS = [
         required: true,
         autocomplete: true,
       },
+      {
+        type: 3,
+        name: "direction",
+        description: "Bus direction",
+        required: true,
+        autocomplete: true,
+      },
     ],
   },
 ];
 
+/*
+ * =========================================================
+ * BASIC HELPERS
+ * =========================================================
+ */
+
 function json(data, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(data, null, 2), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=UTF-8",
-      ...extraHeaders,
-    },
-  });
+  return new Response(
+    JSON.stringify(data, null, 2),
+    {
+      status,
+
+      headers: {
+        "Content-Type":
+          "application/json; charset=UTF-8",
+
+        ...extraHeaders,
+      },
+    }
+  );
 }
 
 function hexToUint8Array(hex) {
-  const bytes = new Uint8Array(hex.length / 2);
-
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(
-      hex.slice(i * 2, i * 2 + 2),
-      16
+  const bytes =
+    new Uint8Array(
+      hex.length / 2
     );
+
+  for (
+    let i = 0;
+    i < bytes.length;
+    i++
+  ) {
+    bytes[i] =
+      parseInt(
+        hex.slice(
+          i * 2,
+          i * 2 + 2
+        ),
+        16
+      );
   }
 
   return bytes;
 }
 
-async function verifyDiscordRequest(request, env) {
+/*
+ * =========================================================
+ * DISCORD SIGNATURE VERIFICATION
+ * =========================================================
+ */
+
+async function verifyDiscordRequest(
+  request,
+  env
+) {
   const signature =
-    request.headers.get("X-Signature-Ed25519");
+    request.headers.get(
+      "X-Signature-Ed25519"
+    );
 
   const timestamp =
-    request.headers.get("X-Signature-Timestamp");
+    request.headers.get(
+      "X-Signature-Timestamp"
+    );
 
   if (
     !signature ||
@@ -73,25 +127,40 @@ async function verifyDiscordRequest(request, env) {
     return false;
   }
 
-  const body = await request.clone().text();
+  const body =
+    await request.clone().text();
 
   try {
-    const publicKey = await crypto.subtle.importKey(
-      "raw",
-      hexToUint8Array(env.DISCORD_PUBLIC_KEY),
-      {
-        name: "Ed25519",
-        namedCurve: "Ed25519",
-      },
-      false,
-      ["verify"]
-    );
+    const publicKey =
+      await crypto.subtle.importKey(
+        "raw",
+
+        hexToUint8Array(
+          env.DISCORD_PUBLIC_KEY
+        ),
+
+        {
+          name: "Ed25519",
+          namedCurve: "Ed25519",
+        },
+
+        false,
+
+        ["verify"]
+      );
 
     return await crypto.subtle.verify(
       "Ed25519",
+
       publicKey,
-      hexToUint8Array(signature),
-      new TextEncoder().encode(timestamp + body)
+
+      hexToUint8Array(
+        signature
+      ),
+
+      new TextEncoder().encode(
+        timestamp + body
+      )
     );
   } catch (error) {
     console.error(
@@ -105,61 +174,26 @@ async function verifyDiscordRequest(request, env) {
 
 /*
  * =========================================================
- * ΟΑΣΑ - ΓΡΑΜΜΕΣ ΜΕ CACHE
+ * GENERIC OASA FETCH
  * =========================================================
  */
 
-async function getOasaLines(ctx) {
-  const cache = caches.default;
+async function fetchOasaJson(url) {
+  const response =
+    await fetch(
+      url,
+      {
+        method: "GET",
 
-  const cacheKey = new Request(
-    CACHE_KEY_URL,
-    {
-      method: "GET",
-    }
-  );
+        headers: {
+          Accept:
+            "application/json, text/plain, */*",
 
-  /*
-   * 1. Προσπάθησε πρώτα να βρεις cached γραμμές.
-   */
-
-  const cachedResponse =
-    await cache.match(cacheKey);
-
-  if (cachedResponse) {
-    console.log("OASA lines cache HIT");
-
-    return await cachedResponse.json();
-  }
-
-  /*
-   * 2. Δεν υπάρχει cache.
-   *    Πάμε απευθείας στην τηλεματική ΟΑΣΑ.
-   */
-
-  console.log("OASA lines cache MISS");
-
-  const started = Date.now();
-
-  const response = await fetch(
-    OASA_LINES_URL,
-    {
-      method: "GET",
-      headers: {
-        Accept:
-          "application/json, text/plain, */*",
-        "User-Agent":
-          "Papoutsis-Digital-BusApp/1.0",
-      },
-    }
-  );
-
-  const elapsed =
-    Date.now() - started;
-
-  console.log(
-    `OASA response: ${response.status} in ${elapsed}ms`
-  );
+          "User-Agent":
+            "Papoutsis-Digital-BusApp/1.0",
+        },
+      }
+    );
 
   if (!response.ok) {
     throw new Error(
@@ -170,40 +204,91 @@ async function getOasaLines(ctx) {
   const text =
     await response.text();
 
-  let lines;
+  let data;
 
   try {
-    lines = JSON.parse(text);
-  } catch (error) {
+    data =
+      JSON.parse(text);
+  } catch {
     throw new Error(
       "OASA returned invalid JSON"
     );
   }
 
-  if (!Array.isArray(lines)) {
+  if (!Array.isArray(data)) {
     throw new Error(
       "OASA returned non-array data"
     );
   }
 
+  return data;
+}
+
+/*
+ * =========================================================
+ * CACHE HELPERS
+ * =========================================================
+ */
+
+async function getCachedData(
+  cacheName,
+  fetchFunction,
+  ctx
+) {
+  const cache =
+    caches.default;
+
+  const cacheKey =
+    new Request(
+      `${CACHE_BASE_URL}${cacheName}`,
+      {
+        method: "GET",
+      }
+    );
+
   /*
-   * 3. Αποθήκευση των γραμμών στην Cloudflare cache.
-   *
-   *    5 λεπτά TTL.
+   * CACHE HIT
    */
 
-  const cacheResponse = new Response(
-    JSON.stringify(lines),
-    {
-      status: 200,
-      headers: {
-        "Content-Type":
-          "application/json; charset=UTF-8",
-        "Cache-Control":
-          `public, max-age=${CACHE_TTL}`,
-      },
-    }
+  const cachedResponse =
+    await cache.match(
+      cacheKey
+    );
+
+  if (cachedResponse) {
+    console.log(
+      `CACHE HIT: ${cacheName}`
+    );
+
+    return await cachedResponse.json();
+  }
+
+  /*
+   * CACHE MISS
+   */
+
+  console.log(
+    `CACHE MISS: ${cacheName}`
   );
+
+  const data =
+    await fetchFunction();
+
+  const cacheResponse =
+    new Response(
+      JSON.stringify(data),
+      {
+        status: 200,
+
+        headers: {
+          "Content-Type":
+            "application/json; charset=UTF-8",
+
+          "Cache-Control":
+            `public, max-age=${CACHE_TTL}`,
+        },
+      }
+    );
 
   ctx.waitUntil(
     cache.put(
@@ -212,77 +297,177 @@ async function getOasaLines(ctx) {
     )
   );
 
-  return lines;
+  return data;
 }
 
 /*
  * =========================================================
- * DISCORD AUTOCOMPLETE
+ * OASA LINES
  * =========================================================
  */
 
-function makeAutocompleteResponse(
+async function getOasaLines(ctx) {
+  return await getCachedData(
+    "lines",
+
+    async () => {
+      return await fetchOasaJson(
+        OASA_LINES_URL
+      );
+    },
+
+    ctx
+  );
+}
+
+/*
+ * =========================================================
+ * FIND LINE
+ * =========================================================
+ *
+ * Discord value:
+ *
+ * 304
+ *
+ * OASA:
+ *
+ * LineID   = 304
+ * LineCode = 953
+ *
+ */
+
+async function findLine(
+  lines,
+  lineValue
+) {
+  const search =
+    String(
+      lineValue || ""
+    ).trim();
+
+  return lines.find(
+    (line) =>
+      String(
+        line.LineID ?? ""
+      ) === search
+  );
+}
+
+/*
+ * =========================================================
+ * OASA ROUTES
+ * =========================================================
+ */
+
+async function getOasaRoutes(
+  lineCode,
+  ctx
+) {
+  const cacheName =
+    `routes-${lineCode}`;
+
+  return await getCachedData(
+    cacheName,
+
+    async () => {
+      const url =
+        `${OASA_ROUTES_URL}${encodeURIComponent(
+          lineCode
+        )}`;
+
+      return await fetchOasaJson(
+        url
+      );
+    },
+
+    ctx
+  );
+}
+
+/*
+ * =========================================================
+ * LINE AUTOCOMPLETE
+ * =========================================================
+ */
+
+function makeLineAutocomplete(
   lines,
   query
 ) {
   const search =
-    String(query || "")
+    String(
+      query || ""
+    )
       .trim()
       .toLowerCase();
 
-  const choices = lines
-    .filter((line) => {
-      const id =
-        String(
-          line.LineID ?? ""
-        ).toLowerCase();
+  const choices =
+    lines
+      .filter((line) => {
+        const id =
+          String(
+            line.LineID ?? ""
+          ).toLowerCase();
 
-      const greek =
-        String(
-          line.LineDescr ?? ""
-        ).toLowerCase();
+        const greek =
+          String(
+            line.LineDescr ?? ""
+          ).toLowerCase();
 
-      const english =
-        String(
-          line.LineDescrEng ?? ""
-        ).toLowerCase();
+        const english =
+          String(
+            line.LineDescrEng ?? ""
+          ).toLowerCase();
 
-      if (!search) {
-        return true;
-      }
+        if (!search) {
+          return true;
+        }
 
-      return (
-        id.includes(search) ||
-        greek.includes(search) ||
-        english.includes(search)
-      );
-    })
-    .slice(0, 25)
-    .map((line) => {
-      const id =
-        String(
-          line.LineID ?? ""
+        return (
+          id.includes(search) ||
+          greek.includes(search) ||
+          english.includes(search)
         );
+      })
 
-      const greek =
-        String(
-          line.LineDescr ?? ""
-        ).trim();
+      .slice(0, 25)
 
-      let label = id;
+      .map((line) => {
+        const id =
+          String(
+            line.LineID ?? ""
+          );
 
-      if (greek) {
-        label += ` - ${greek}`;
-      }
+        const greek =
+          String(
+            line.LineDescr ?? ""
+          ).trim();
 
-      return {
-        name: label.slice(0, 100),
-        value: id.slice(0, 100),
-      };
-    });
+        let label = id;
+
+        if (greek) {
+          label +=
+            ` - ${greek}`;
+        }
+
+        return {
+          name:
+            label.slice(
+              0,
+              100
+            ),
+
+          value:
+            id.slice(
+              0,
+              100
+            ),
+        };
+      });
 
   return json({
     type: 8,
+
     data: {
       choices,
     },
@@ -291,11 +476,172 @@ function makeAutocompleteResponse(
 
 /*
  * =========================================================
- * DISCORD COMMAND REGISTRATION
+ * DIRECTION AUTOCOMPLETE
  * =========================================================
  */
 
-async function registerCommands(env) {
+async function makeDirectionAutocomplete(
+  lines,
+  selectedLine,
+  query,
+  ctx
+) {
+  /*
+   * Δεν έχουμε ακόμη γραμμή.
+   */
+
+  if (!selectedLine) {
+    return json({
+      type: 8,
+
+      data: {
+        choices: [],
+      },
+    });
+  }
+
+  /*
+   * Βρίσκουμε το LineCode
+   * από το LineID.
+   */
+
+  const line =
+    await findLine(
+      lines,
+      selectedLine
+    );
+
+  if (!line) {
+    return json({
+      type: 8,
+
+      data: {
+        choices: [],
+      },
+    });
+  }
+
+  const lineCode =
+    String(
+      line.LineCode ?? ""
+    );
+
+  if (!lineCode) {
+    return json({
+      type: 8,
+
+      data: {
+        choices: [],
+      },
+    });
+  }
+
+  /*
+   * Παίρνουμε τις διαδρομές
+   * απευθείας από την τηλεματική.
+   */
+
+  const routes =
+    await getOasaRoutes(
+      lineCode,
+      ctx
+    );
+
+  const search =
+    String(
+      query || ""
+    )
+      .trim()
+      .toLowerCase();
+
+  const choices =
+    routes
+      .filter((route) => {
+        const code =
+          String(
+            route.RouteCode ?? ""
+          ).toLowerCase();
+
+        const greek =
+          String(
+            route.RouteDescr ?? ""
+          ).toLowerCase();
+
+        const english =
+          String(
+            route.RouteDescrEng ?? ""
+          ).toLowerCase();
+
+        if (!search) {
+          return true;
+        }
+
+        return (
+          code.includes(search) ||
+          greek.includes(search) ||
+          english.includes(search)
+        );
+      })
+
+      .slice(0, 25)
+
+      .map((route) => {
+        const routeCode =
+          String(
+            route.RouteCode ?? ""
+          );
+
+        const greek =
+          String(
+            route.RouteDescr ?? ""
+          ).trim();
+
+        const english =
+          String(
+            route.RouteDescrEng ?? ""
+          ).trim();
+
+        let label =
+          greek || english;
+
+        if (!label) {
+          label =
+            `Διαδρομή ${routeCode}`;
+        }
+
+        return {
+          name:
+            label.slice(
+              0,
+              100
+            ),
+
+          value:
+            routeCode.slice(
+              0,
+              100
+            ),
+        };
+      });
+
+  return json({
+    type: 8,
+
+    data: {
+      choices,
+    },
+  });
+}
+
+/*
+ * =========================================================
+ * REGISTER DISCORD COMMANDS
+ * =========================================================
+ */
+
+async function registerCommands(
+  env
+) {
   if (!env.DISCORD_TOKEN) {
     throw new Error(
       "Missing DISCORD_TOKEN"
@@ -312,21 +658,25 @@ async function registerCommands(env) {
     `https://discord.com/api/v10/applications/${env.APPLICATION_ID}/commands`;
 
   const response =
-    await fetch(url, {
-      method: "PUT",
+    await fetch(
+      url,
+      {
+        method: "PUT",
 
-      headers: {
-        Authorization:
-          `Bot ${env.DISCORD_TOKEN}`,
+        headers: {
+          Authorization:
+            `Bot ${env.DISCORD_TOKEN}`,
 
-        "Content-Type":
-          "application/json",
-      },
+          "Content-Type":
+            "application/json",
+        },
 
-      body: JSON.stringify(
-        COMMANDS
-      ),
-    });
+        body:
+          JSON.stringify(
+            COMMANDS
+          ),
+      }
+    );
 
   const text =
     await response.text();
@@ -373,7 +723,8 @@ async function testOasa() {
       );
 
     const elapsed =
-      Date.now() - started;
+      Date.now() -
+      started;
 
     const body =
       await response.text();
@@ -412,7 +763,8 @@ async function testOasa() {
           false,
 
         elapsedMs:
-          Date.now() - started,
+          Date.now() -
+          started,
 
         error:
           error?.message ||
@@ -442,45 +794,40 @@ async function handleInteraction(
     await request.json();
 
   /*
-   * Discord PING
+   * DISCORD PING
    */
 
-  if (body.type === 1) {
+  if (
+    body.type === 1
+  ) {
     return json({
       type: 1,
     });
   }
 
   /*
-   * Autocomplete
+   * AUTOCOMPLETE
    *
-   * Discord interaction type 4
+   * Discord type 4
    */
 
-  if (body.type === 4) {
-    const option =
-      body.data?.options?.find(
-        (item) =>
-          item.focused === true
+  if (
+    body.type === 4
+  ) {
+    const options =
+      body.data?.options ||
+      [];
+
+    const focusedOption =
+      options.find(
+        (option) =>
+          option.focused ===
+          true
       );
 
-    const query =
-      option?.value || "";
-
-    try {
-      const lines =
-        await getOasaLines(ctx);
-
-      return makeAutocompleteResponse(
-        lines,
-        query
-      );
-    } catch (error) {
-      console.error(
-        "OASA autocomplete error:",
-        error
-      );
-
+    if (
+      !focusedOption
+    ) {
       return json({
         type: 8,
 
@@ -489,33 +836,229 @@ async function handleInteraction(
         },
       });
     }
+
+    /*
+     * ===============================================
+     * ΕΛΛΗΝΙΚΑ
+     * ===============================================
+     */
+
+    if (
+      focusedOption.name ===
+      "γραμμή"
+    ) {
+      try {
+        const lines =
+          await getOasaLines(
+            ctx
+          );
+
+        return makeLineAutocomplete(
+          lines,
+          focusedOption.value
+        );
+      } catch (error) {
+        console.error(
+          "OASA line autocomplete error:",
+          error
+        );
+
+        return json({
+          type: 8,
+
+          data: {
+            choices: [],
+          },
+        });
+      }
+    }
+
+    if (
+      focusedOption.name ===
+      "κατεύθυνση"
+    ) {
+      try {
+        const lines =
+          await getOasaLines(
+            ctx
+          );
+
+        const lineOption =
+          options.find(
+            (option) =>
+              option.name ===
+              "γραμμή"
+          );
+
+        const selectedLine =
+          lineOption?.value ||
+          "";
+
+        return await makeDirectionAutocomplete(
+          lines,
+          selectedLine,
+          focusedOption.value,
+          ctx
+        );
+      } catch (error) {
+        console.error(
+          "OASA direction autocomplete error:",
+          error
+        );
+
+        return json({
+          type: 8,
+
+          data: {
+            choices: [],
+          },
+        });
+      }
+    }
+
+    /*
+     * ===============================================
+     * ENGLISH
+     * ===============================================
+     */
+
+    if (
+      focusedOption.name ===
+      "line"
+    ) {
+      try {
+        const lines =
+          await getOasaLines(
+            ctx
+          );
+
+        return makeLineAutocomplete(
+          lines,
+          focusedOption.value
+        );
+      } catch (error) {
+        console.error(
+          "OASA English line autocomplete error:",
+          error
+        );
+
+        return json({
+          type: 8,
+
+          data: {
+            choices: [],
+          },
+        });
+      }
+    }
+
+    if (
+      focusedOption.name ===
+      "direction"
+    ) {
+      try {
+        const lines =
+          await getOasaLines(
+            ctx
+          );
+
+        const lineOption =
+          options.find(
+            (option) =>
+              option.name ===
+              "line"
+          );
+
+        const selectedLine =
+          lineOption?.value ||
+          "";
+
+        return await makeDirectionAutocomplete(
+          lines,
+          selectedLine,
+          focusedOption.value,
+          ctx
+        );
+      } catch (error) {
+        console.error(
+          "OASA English direction autocomplete error:",
+          error
+        );
+
+        return json({
+          type: 8,
+
+          data: {
+            choices: [],
+          },
+        });
+      }
+    }
+
+    return json({
+      type: 8,
+
+      data: {
+        choices: [],
+      },
+    });
   }
 
   /*
-   * Slash command
+   * SLASH COMMAND
    */
 
-  if (body.type === 2) {
+  if (
+    body.type === 2
+  ) {
     const commandName =
       body.data?.name;
 
     if (
-      commandName === "αφίξεις" ||
-      commandName === "arrivals"
+      commandName ===
+        "αφίξεις" ||
+      commandName ===
+        "arrivals"
     ) {
-      const option =
-        body.data?.options?.[0];
+      const options =
+        body.data?.options ||
+        [];
+
+      const lineOption =
+        options.find(
+          (option) =>
+            option.name ===
+            "γραμμή" ||
+            option.name ===
+            "line"
+        );
+
+      const directionOption =
+        options.find(
+          (option) =>
+            option.name ===
+            "κατεύθυνση" ||
+            option.name ===
+            "direction"
+        );
 
       const line =
-        option?.value || "";
+        lineOption?.value ||
+        "";
+
+      const direction =
+        directionOption?.value ||
+        "";
 
       return json({
         type: 4,
 
         data: {
           content:
-            `🚌 Επιλέχθηκε η γραμμή **${line}**.\n\n` +
-            `Η γραμμή αναζητήθηκε απευθείας από την τηλεματική του ΟΑΣΑ.`,
+            `🚌 **Γραμμή:** ${line}\n` +
+            `🧭 **RouteCode:** ${direction}\n\n` +
+            `Η γραμμή και η κατεύθυνση αναζητήθηκαν απευθείας από την τηλεματική του ΟΑΣΑ.\n\n` +
+            `📍 Επόμενο βήμα: επιλογή στάσης και πραγματικές αφίξεις.`,
         },
       });
     }
@@ -538,9 +1081,15 @@ async function handleInteraction(
  */
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(
+    request,
+    env,
+    ctx
+  ) {
     const url =
-      new URL(request.url);
+      new URL(
+        request.url
+      );
 
     /*
      * -----------------------------------------------------
@@ -662,7 +1211,7 @@ export default {
 
     /*
      * -----------------------------------------------------
-     * DISCORD
+     * DISCORD INTERACTIONS
      * -----------------------------------------------------
      */
 
