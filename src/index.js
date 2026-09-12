@@ -1,6 +1,6 @@
 const DISCORD_API = "https://discord.com/api/v10";
 const BUSAPP_API =
-  "https://telematics.oasa.gr/api";
+  "https://telematics.oasa.gr/api/";
 
 export default {
   async fetch(request, env) {
